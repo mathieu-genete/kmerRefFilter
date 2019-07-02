@@ -96,11 +96,12 @@ optional arguments:
 
 `python kmerRefFilter.py -r reference_sequences.fasta -1 fastq1_R1 fastq2_R1 -2 fastq1_R2 fastq2_R2 -o output_directory`
 
-### Command line usage for URL files path
+### Command line usage on download stream:
 
-- if the files are compressed in gzip format, use -ugzip option.
+Fastq files are directly filtered on dowload stream. If the files are compressed in gzip format, use -ugzip option.
       
 example for gz compressed fastq files:
+
 `python kmerRefFilter.py -r reference_sequences.fasta -u1 fastq_url_R1 -u2 fastq_url_R2 -ugzip -o output_directory`
 
 ## Contact Information

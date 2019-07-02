@@ -5,7 +5,7 @@ We developed a dedicated algorithm (kmerRefFilter) to reduce, either locally or 
 ## Dependencies
 kmerRefFilter is written with Python 2.7.5 and requires biopython (https://github.com/biopython/biopython) package installed before running.
 
-## Running emm-typing-tool
+## Running kmerRefFilter
 ----------------------------
 ```
 usage: kmerRefFilter [-h] [-v] [-prog] [-a] [-d] [-y] [-knf] [-o OUTPUTDIR]
@@ -91,6 +91,17 @@ optional arguments:
                         (FWD), reverse kmers only (REV) or both (BOTH - by
                         default)
 ```
+
+### Basic command line usage:
+
+      `python kmerRefFilter.py -r reference_sequences.fasta -1 fastq1_R1 fastq2_R1 -2 fastq1_R2 fastq2_R2 -o output_directory`
+
+### Command line usage for URL files path
+
+      - if the files are compressed in gzip format, use -ugzip option.
+      
+      example for gz compressed fastq files:
+      `python kmerRefFilter.py -r reference_sequences.fasta -u1 fastq_url_R1 -u2 fastq_url_R2 -ugzip -o output_directory`
 
 ## Contact Information
 Mathieu Genete

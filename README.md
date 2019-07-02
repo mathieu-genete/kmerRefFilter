@@ -6,7 +6,6 @@ We developed a dedicated algorithm (kmerRefFilter) to reduce, either locally or 
 kmerRefFilter is written with Python 2.7.5 and requires biopython (https://github.com/biopython/biopython) package installed before running.
 
 ## Running kmerRefFilter
-----------------------------
 ```
 usage: kmerRefFilter [-h] [-v] [-prog] [-a] [-d] [-y] [-knf] [-o OUTPUTDIR]
                      [-k KMERSIZE] [-m MINMATCHKEEPSEQ] [-z MINSHENTROPY]
@@ -92,11 +91,19 @@ optional arguments:
                         default)
 ```
 
-### Basic command line usage:
+### Basic command line usage
+
+using fasta file as reference:
 
 `python kmerRefFilter.py -r reference_sequences.fasta -1 fastq1_R1 fastq2_R1 -2 fastq1_R2 fastq2_R2 -o output_directory`
 
-### Command line usage on download stream:
+or using a saved dictionary (previously saved with -p option):
+
+`python kmerRefFilter.py -i saved_dictionary -1 fastq1_R1 fastq2_R1 -2 fastq1_R2 fastq2_R2 -o output_directory`
+
+filtered fastq files are created in output_directory.
+
+### Basic Command line usage on download stream
 
 Fastq files are directly filtered on dowload stream. If the files are compressed in gzip format, use -ugzip option.
       
@@ -104,10 +111,14 @@ example for gz compressed fastq files:
 
 `python kmerRefFilter.py -r reference_sequences.fasta -u1 fastq_url_R1 -u2 fastq_url_R2 -ugzip -o output_directory`
 
-## Contact Information
+### exclude option (-x)
+
+Need a fasta file as input. Generates a set of kmers, using the fasta file, and next exclude them from the kmer reference dictionary.
+
+### Contact Information
 Mathieu Genete
 
 Email: mathieu.genete@univ-lille.fr
 
-## Licence Agreement
+### Licence Agreement
 This software is covered by GNU General Public License, version 3 (GPL-3.0).

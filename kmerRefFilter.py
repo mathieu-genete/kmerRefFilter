@@ -32,20 +32,24 @@ deltaTprogress = None
 
 random.seed(time.time())
 
-def find_read_ORF(seq,minPercORF):
+def find_read_ORF(seq,minPercORF,maxPercORF):
     outCoding={'IsCoding':False,'pctORF':0,'strand':{'value':'','phase':0,'prot':'','protShE':0,'protFreq':{'letters':'','freq':-1}},'dnaShE':0}
     if len(seq)>=6:
         theoricProtSize=(len(seq)-(len(seq)%3))/3
         dnaSeq=Seq.Seq(seq,generic_dna)
         RCdnaSeq=dnaSeq.reverse_complement()
         for phase in range(0,3):
-            dnaPahsed={'+':dnaSeq[phase:],'-':RCdnaSeq[phase:]}
+            pstrand=dnaSeq[phase:]
+            nstrand=RCdnaSeq[phase:]
+            phased_pstrand=pstrand[:(len(pstrand)-(len(pstrand)%3))]
+            phased_nstrand=nstrand[:(len(nstrand)-(len(nstrand)%3))]
+            dnaPahsed={'+':phased_pstrand,'-':phased_nstrand}
             for strand,pdna in dnaPahsed.items():
                 protSeq=str(pdna.translate())
                 maxprotSize=float(max([len(subpseq) for subpseq in protSeq.split("*")]))
                 pctORF=maxprotSize/theoricProtSize
                 s=str(pdna)
-                if pctORF>=minPercORF:
+                if pctORF>=minPercORF and pctORF<=maxPercORF:
                     outCoding['IsCoding']=True
                     outCoding['pctORF']=pctORF
                     outCoding['strand']['value']=strand
@@ -54,9 +58,9 @@ def find_read_ORF(seq,minPercORF):
                     outCoding['strand']['protFreq']=repeats_frequency(protSeq)
     return outCoding
 
-def is_read_ORF_PAIRED(Fwdseq,Revseq,minPercORF,maxprotrepeatfreq,sbcoding):
-    FWDcoding=find_read_ORF(Fwdseq,minPercORF)
-    REVcoding=find_read_ORF(Revseq,minPercORF)
+def is_read_ORF_PAIRED(Fwdseq,Revseq,minPercORF,maxPercORF,maxprotrepeatfreq,sbcoding):
+    FWDcoding=find_read_ORF(Fwdseq,minPercORF,maxPercORF)
+    REVcoding=find_read_ORF(Revseq,minPercORF,maxPercORF)
     
     FwdFreqUnderThrld=(FWDcoding['strand']['protFreq']['freq']<=maxprotrepeatfreq and FWDcoding['strand']['protFreq']['freq']>0)
     RevFreqUnderThrld=(REVcoding['strand']['protFreq']['freq']<=maxprotrepeatfreq and REVcoding['strand']['protFreq']['freq']>0)
@@ -65,25 +69,35 @@ def is_read_ORF_PAIRED(Fwdseq,Revseq,minPercORF,maxprotrepeatfreq,sbcoding):
         TotalpctORF=((FWDcoding['pctORF']+REVcoding['pctORF'])/2)
         TotalpctORFThrld=(TotalpctORF>=minPercORF)
         FwdRevFreqUnderThrld=(FwdFreqUnderThrld and RevFreqUnderThrld)
-        FwdRevSameStrand=(FWDcoding['strand']['value']==REVcoding['strand']['value'])
+        FwdRevSameStrand=(FWDcoding['strand']['value']==REVcoding['strand']['value'] and test_strand(FWDcoding['strand']['value']))
         boolTest=(FWDcoding['IsCoding'] and REVcoding['IsCoding'] and FwdRevSameStrand and FwdRevFreqUnderThrld and TotalpctORFThrld)
 
     elif sbcoding=="SINGLE":
-        boolTest=((FWDcoding['IsCoding'] and FwdFreqUnderThrld) or (REVcoding['IsCoding'] and RevFreqUnderThrld))
+        boolTest=((FWDcoding['IsCoding'] and FwdFreqUnderThrld and test_strand(FWDcoding['strand']['value'])) or (REVcoding['IsCoding'] and RevFreqUnderThrld and test_strand(REVcoding['strand']['value'])))
+    elif sbcoding=="SINGEXBOTH":
+        boolTest=((FWDcoding['IsCoding']!=REVcoding['IsCoding']) and ((FWDcoding['IsCoding'] and FwdFreqUnderThrld and test_strand(FWDcoding['strand']['value'])) or (REVcoding['IsCoding'] and RevFreqUnderThrld and test_strand(REVcoding['strand']['value']))))
     else:
         boolTest=False
     return boolTest
 
-def is_read_ORF_SINGLE(readseq,minPercORF,maxprotrepeatfreq,sbcoding):
-    Readcoding=find_read_ORF(readseq,minPercORF)
+def is_read_ORF_SINGLE(readseq,minPercORF,maxPercORF,maxprotrepeatfreq,sbcoding):
+    Readcoding=find_read_ORF(readseq,minPercORF,maxPercORF)
     
     if Readcoding['IsCoding']:
         FreqUnderThrld=(Readcoding['strand']['protFreq']['freq']<=maxprotrepeatfreq and Readcoding['strand']['protFreq']['freq']>0)
         TotalpctORFThrld=(Readcoding['pctORF']>=minPercORF)
-        boolTest=(FreqUnderThrld and TotalpctORFThrld)
+        boolTest=(FreqUnderThrld and TotalpctORFThrld and test_strand(Readcoding['strand']['value']))
     else:
         boolTest=False
     return boolTest
+
+def test_strand(strandValue):
+    strandintdic={'+':1,'-':2}
+    strandint=strandintdic[strandValue]
+    if args.strandorf!=0:
+        return (args.strandorf==strandint)
+    else:
+        return True
 
 def get_procmem():
     process = psutil.Process(os.getpid())
@@ -409,8 +423,8 @@ def kmerRefFilterProc(dicReads,kmerSize,fastqFile,minMatchKeepSeq,keepNotFiltere
         intersections = kmseq.intersection(dicReads)
         m=len(intersections)
 
-        if args.minporf>0:
-            keepReadBool=(m>0 and m>=minMatchKeepSeq and is_read_ORF_SINGLE(seq,args.minporf,args.maxprotfreq,args.singbothcoding))
+        if args.minporf>0 or args.maxporf<1:
+            keepReadBool=(m>0 and m>=minMatchKeepSeq and is_read_ORF_SINGLE(seq,args.minporf,args.maxprotfreq,args.maxporf,args.singbothcoding))
         else:
             keepReadBool=(m>0 and m>=minMatchKeepSeq)
 
@@ -462,9 +476,9 @@ def kmerRefFilterProc(dicReads,kmerSize,fastqFile,minMatchKeepSeq,keepNotFiltere
     if args.append:
         appendInfo="-- {} reads append ".format(appendNbr)
         
-    if args.minporf>0:
-        singbothTXT={'SINGLE':'(Fwd OR Rev)','BOTH':'(Fwd AND Rev)'}
-        appendInfo+="-- {} contains at least {}% ORF ".format(singbothTXT[args.singbothcoding],args.minporf*100)
+    if args.minporf>0 or args.maxporf<1:
+        singbothTXT={'SINGLE':'(Fwd OR Rev)','BOTH':'(Fwd AND Rev)','SINGEXBOTH':'(Fwd OR Rev exclude Fwd AND Rev)'}
+        appendInfo+="-- {} contains at least {}% to {}% ORF ".format(singbothTXT[args.singbothcoding],args.minporf*100,args.maxporf*100)
 
     if matched>0:
         meanRdSize=round(float(SumReadsSize)/float(matched),1)
@@ -621,9 +635,9 @@ def kmerRefFilterPairedProc(dicReads,kmerSize,fastqFwdFile,fastqRevFile,minMatch
     if args.append:
         appendInfo="-- {} reads append ".format(appendNbr)
 
-    if args.minporf>0:
-        singbothTXT={'SINGLE':'(Fwd OR Rev)','BOTH':'(Fwd AND Rev)'}
-        appendInfo+="-- {} contains at least {}% ORF ".format(singbothTXT[args.singbothcoding],args.minporf*100)
+    if args.minporf>0 or args.maxporf<1:
+        singbothTXT={'SINGLE':'(Fwd OR Rev)','BOTH':'(Fwd AND Rev)','SINGEXBOTH':'(Fwd OR Rev exclude Fwd AND Rev)'}
+        appendInfo+="-- {} contains at least {}% to {}% ORF ".format(singbothTXT[args.singbothcoding],args.minporf*100,args.maxporf*100)
 
     strFqFiles = "[{} - {}]".format(fwdbname,revbname)
 
@@ -669,8 +683,8 @@ def search_kmerInRead(readRange,kmerSize,dicReads,minMatchKeepSeq,outReadsDic,se
     intersections = kmseq.intersection(dicReads)
     m=len(intersections)
 
-    if args.minporf>0:
-        keepReadBool=(m>0 and m>=minMatchKeepSeq and is_read_ORF_PAIRED(FwdL[1].strip(),RevL[1].strip(),args.minporf,args.maxprotfreq,args.singbothcoding))
+    if args.minporf>0 or args.maxporf<1:
+        keepReadBool=(m>0 and m>=minMatchKeepSeq and is_read_ORF_PAIRED(FwdL[1].strip(),RevL[1].strip(),args.minporf,args.maxporf,args.maxprotfreq,args.singbothcoding))
     else:
         keepReadBool=(m>0 and m>=minMatchKeepSeq)
 
@@ -800,9 +814,11 @@ def kmerRefFilter(ArgsVal):
     parser.add_argument("-c","--fwdRevChoice", help="for paired filtering: filtering on forward reads only (FWD), reverse reads only (REV) or both (BOTH - by default)", default='BOTH')
     parser.add_argument("-kc","--kmerFwdRev", help="kmders dictionary generation: use forward kmers only (FWD), reverse kmers only (REV) or both (BOTH - by default)", default='BOTH')
     
-    parser.add_argument("-porf","--minporf", help="minimum percent of ORF in read",default=0, type=float)
+    parser.add_argument("-morf","--minporf", help="minimum percent of ORF in read",default=0, type=float)
+    parser.add_argument("-Morf","--maxporf", help="maximum percent of ORF in read",default=1, type=float)
+    parser.add_argument("-sorf","--strandorf", help="force strand for ORF filtering (both=0, +=1, -=2) -- default=0", default=0, type=int)
     parser.add_argument("-pfreq","--maxprotfreq", help="maximum frequency of AA repetitions in proteics sequences from reads (default = 0.6)",default=0.8, type=float)
-    parser.add_argument("-sbc","--singbothcoding", help="apply ORF threshold for single (SINGLE) or both (BOTH) forward and reverse reads to keep the pair  (SINGLE - by default)", default='SINGLE')
+    parser.add_argument("-sbc","--singbothcoding", help="apply ORF threshold for single (SINGLE); both (BOTH) forward and reverse reads to keep the pair or single exclude both (SINGEXBOTH) (SINGLE - by default)", default='SINGLE')
 
     args = parser.parse_args(ArgsVal)
     
@@ -826,7 +842,7 @@ def kmerRefFilter(ArgsVal):
         stderr_print("-ks (--kmerstats) option not correctly set. Use \"USED\" or \"ALL\"\nexit...")
         sys.exit(0)
 
-    if args.singbothcoding not in ['SINGLE','BOTH']:
+    if args.singbothcoding not in ['SINGLE','BOTH','SINGEXBOTH']:
         stderr_print("-sbc (--singbothcoding) option not correctly set. Use \"SINGLE\" or \"BOTH\"\nexit...")
         sys.exit(0)
 
@@ -839,13 +855,19 @@ def kmerRefFilter(ArgsVal):
                (args.maxRepeatsFreq,{'min':0.0,'max':1.0},"--maxRepeatsFreq"),\
                (args.multiproc,{'min':0,'max':None},"--multiproc"),\
                (args.minporf,{'min':0.0,'max':1.0},"--minporf"),\
-               (args.maxprotfreq,{'min':0.0,'max':1.0},"--maxprotfreq")]
+               (args.maxporf,{'min':0.0,'max':1.0},"--maxporf"),\
+               (args.maxprotfreq,{'min':0.0,'max':1.0},"--maxprotfreq"),\
+               (args.strandorf,{'min':0,'max':2},"--strandorf")]
     testFailed=False
     for argt in argToTest:
         testrslt=test_arg_range(argt[0],argt[1],argt[2])
         if not testrslt:
             testFailed=True
     if testFailed:
+        sys.exit(-2)
+
+    if args.maxporf<args.minporf:
+        stderr_print("--minporf should be lesser than --maxporf")
         sys.exit(-2)
 
     progVersion = "{pname} {ver}".format(pname=os.path.basename(sys.argv[0]),ver=__version__)

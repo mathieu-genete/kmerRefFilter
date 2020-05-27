@@ -25,7 +25,7 @@ import yaml
 from multiprocessing import Pool
 from functools import partial
 
-__version__= "v1.3.5"
+__version__= "v1.3.6"
 
 args = None
 deltaTprogress = None
@@ -46,7 +46,7 @@ def find_read_ORF(seq,minPercORF,maxPercORF):
             dnaPahsed={'+':phased_pstrand,'-':phased_nstrand}
             for strand,pdna in dnaPahsed.items():
                 protSeq=str(pdna.translate())
-                maxprotSize=float(max([len(subpseq) for subpseq in protSeq.split("*")]))
+                maxprotSize=float(max([len(subpseq) for subpseq in protSeq.replace("X","*").split("*")]))
                 pctORF=maxprotSize/theoricProtSize
                 s=str(pdna)
                 if pctORF>=minPercORF and pctORF<=maxPercORF:
@@ -193,8 +193,9 @@ def filterkmers(kmerList,kmerExcludeList,minShEntropy=0.8,MaxratioAmb=0.2,maxRep
             while not psync.ready():
                     time.sleep(1)
                     check_max_memoryGo_used()
-                    remaining=100*float(abs(rawsize-(psync._number_left * psync._chunksize)))/float(rawsize)
-                    printProgress("Cleaning progress {}%".format(round(remaining,1)))
+                    if args.printprogress:
+                        remaining=100*float(abs(rawsize-(psync._number_left * psync._chunksize)))/float(rawsize)
+                        printProgress("Cleaning progress {}%".format(round(remaining,1)))
             if None in outpoutmp: outpoutmp.remove(None)
             return_kmers=set(outpoutmp)
     else:
@@ -485,19 +486,32 @@ def kmerRefFilterProc(dicReads,kmerSize,fastqFile,minMatchKeepSeq,keepNotFiltere
     else:
         meanRdSize=0
 
-    stderr_print("\n-- complete for {Fqfile}: {tot} total reads analysed {apnd}-- {pm}% reads kept ({match} reads -- mean size {rdsize} bp) {notFilt}- in {tm}".format(Fqfile=os.path.basename(fastqFile),pm=round(100*(float(matched)/float(tot)),3),match=matched,tot=tot,tm=elapTime,apnd=appendInfo,notFilt=notFilteredInfo,rdsize=meanRdSize))
+    stderr_print("\r-- complete for {Fqfile}: {tot} total reads analysed {apnd}-- {pm}% reads kept ({match} reads -- mean size {rdsize} bp) {notFilt}- in {tm}".format(Fqfile=os.path.basename(fastqFile),pm=round(100*(float(matched)/float(tot)),3),match=matched,tot=tot,tm=elapTime,apnd=appendInfo,notFilt=notFilteredInfo,rdsize=meanRdSize))
     
     return {'reads Nbr': tot,'reads kept': matched,'out file':[os.path.abspath(outFastq)]}
 
-def kmerRefFilterPairedProc(dicReads,kmerSize,fastqFwdFile,fastqRevFile,minMatchKeepSeq,fwdRevChoice,keepNotFiltered,namedPipe,kmerstats):
+def kmerRefFilterPairedProc(dicReads,kmerSize,fastqConcatPairedFile,fastqFwdFile,fastqRevFile,minMatchKeepSeq,fwdRevChoice,keepNotFiltered,namedPipe,kmerstats):
 
     start = time.time()
-    
-    stderr_print(TitleFrame("Launch paired reads filtering"))
+    concatPairedFQ=(fastqConcatPairedFile!="")
+
+    if concatPairedFQ:
+        txttitle="Launch paired concatenated reads filtering"
+    else:
+        txttitle="Launch paired reads filtering"
+
+    stderr_print(TitleFrame(txttitle))
+
+
     if namedPipe:
         stderr_print("Filtering on download stream...")
-    fwdbname = os.path.basename(fastqFwdFile)
-    revbname = os.path.basename(fastqRevFile)
+
+    if concatPairedFQ:
+        fwdbname = os.path.basename(fastqConcatPairedFile)
+        revbname = os.path.basename(fastqConcatPairedFile)
+    else:
+        fwdbname = os.path.basename(fastqFwdFile)
+        revbname = os.path.basename(fastqRevFile)
 
     outFwdFastq = "{}FWD_filtered.fastq".format(get_headFname(fwdbname,['FASTQ','FQ']))
     outRevFastq = "{}REV_filtered.fastq".format(get_headFname(revbname,['FASTQ','FQ']))
@@ -525,8 +539,11 @@ def kmerRefFilterPairedProc(dicReads,kmerSize,fastqFwdFile,fastqRevFile,minMatch
     else:
         writeMode="w"
     
-    fwdfastq = open_fastqFile(fastqFwdFile,namedPipe)
-    revfastq = open_fastqFile(fastqRevFile,namedPipe)
+    if concatPairedFQ:
+        fastqCP = open_fastqFile(fastqConcatPairedFile,namedPipe)
+    else:
+        fwdfastq = open_fastqFile(fastqFwdFile,namedPipe)
+        revfastq = open_fastqFile(fastqRevFile,namedPipe)
 
     outFwdReadsDic=set()
     outRevReadsDic=set()
@@ -554,25 +571,15 @@ def kmerRefFilterPairedProc(dicReads,kmerSize,fastqFwdFile,fastqRevFile,minMatch
     timeprint=time.time()
 
     while True:
+        if concatPairedFQ:
+            FwdL,RevL=read_ConcatenatedPairedFastqLine(fastqCP)
+        else:
+            FwdL,RevL=read_pairedFastqLine(fwdfastq,revfastq)
+        Fwdseq = FwdL[1].strip()
+        Revseq = RevL[1].strip()
+        
 
-        Fwdl1 = fwdfastq.readline()
-        Fwdl2 = fwdfastq.readline()
-        Fwdl3 = fwdfastq.readline()
-        Fwdl4 = fwdfastq.readline()
-        
-        Fwdseq = Fwdl2.strip()
-                
-        Revl1 = revfastq.readline()
-        Revl2 = revfastq.readline()
-        Revl3 = revfastq.readline()
-        Revl4 = revfastq.readline()
-        
-        Revseq = Revl2.strip()
-        
-        FwdL = [Fwdl1,Fwdl2,Fwdl3,Fwdl4]
-        RevL = [Revl1,Revl2,Revl3,Revl4]
-
-        if not Fwdl4 or not Revl4: break
+        if not FwdL[3] or not RevL[3]: break
         
         
         if args.extremity5p3p:
@@ -616,8 +623,12 @@ def kmerRefFilterPairedProc(dicReads,kmerSize,fastqFwdFile,fastqRevFile,minMatch
 
     Fwdoutf.close()
     Revoutf.close()
-    fwdfastq.close()
-    revfastq.close()
+
+    if concatPairedFQ:
+        fastqCP.close()
+    else:
+        fwdfastq.close()
+        revfastq.close()
 
     if keepNotFiltered:
         KeepFwdoutf.close()
@@ -639,16 +650,44 @@ def kmerRefFilterPairedProc(dicReads,kmerSize,fastqFwdFile,fastqRevFile,minMatch
         singbothTXT={'SINGLE':'(Fwd OR Rev)','BOTH':'(Fwd AND Rev)','SINGEXBOTH':'(Fwd OR Rev exclude Fwd AND Rev)'}
         appendInfo+="-- {} contains at least {}% to {}% ORF ".format(singbothTXT[args.singbothcoding],args.minporf*100,args.maxporf*100)
 
-    strFqFiles = "[{} - {}]".format(fwdbname,revbname)
+    if concatPairedFQ:
+        strFqFiles = "[{} - concatenated ]".format(fwdbname)
+    else:
+        strFqFiles = "[{} - {}]".format(fwdbname,revbname)
 
     if matched>0:
         meanRdSize=round(float(SumReadsSize)/float(matched),1)
     else:
         meanRdSize=0
 
-    stderr_print("-- PAIRED complete for {Fqfile}: {tot} total reads per pair analysed {apnd}-- {pm}% reads per pair kept ({match} reads F:{fwdFnd} + R:{revFnd} -- mean size {rdsize} bp) {notFilt}- in {tm}".format(Fqfile=strFqFiles,pm=round(100*(float(matched)/float(tot)),3),match=matched,tot=tot,tm=elapTime,apnd=appendInfo,notFilt=notFilteredInfo,fwdFnd=FWDFound,revFnd=REVFound,rdsize=meanRdSize))
+    stderr_print("\r-- PAIRED complete for {Fqfile}: {tot} total reads per pair analysed {apnd}-- {pm}% reads per pair kept ({match} reads F:{fwdFnd} + R:{revFnd} -- mean size {rdsize} bp) {notFilt}- in {tm}".format(Fqfile=strFqFiles,pm=round(100*(float(matched)/float(tot)),3),match=matched,tot=tot,tm=elapTime,apnd=appendInfo,notFilt=notFilteredInfo,fwdFnd=FWDFound,revFnd=REVFound,rdsize=meanRdSize))
 
     return {'reads Nbr': tot,'reads kept': matched,'out file':[os.path.abspath(outFwdFastq),os.path.abspath(outRevFastq)]}
+
+def read_pairedFastqLine(hfwd,hrev):
+    FwdLines=[hfwd.readline() for i in range(0,4)]
+    RevLines=[hrev.readline() for i in range(0,4)]
+    return FwdLines,RevLines
+
+def read_ConcatenatedPairedFastqLine(hcp):
+    FwdLines=[]
+    RevLines=[]
+    HcpLines=[hcp.readline() for i in range(0,4)]
+    seq=HcpLines[1].strip()
+    qual=HcpLines[3].strip()
+    FwdLines.append(HcpLines[0])
+    RevLines.append(HcpLines[0])
+    FwdLines.append("{}\n".format(seq[:len(seq)/2]))
+    RevLines.append("{}\n".format(seq[len(seq)/2:]))
+    FwdLines.append(HcpLines[2])
+    RevLines.append(HcpLines[2])
+    if not qual:
+        FwdLines.append("")
+        RevLines.append("")
+    else:
+        FwdLines.append("{}\n".format(qual[:len(qual)/2]))
+        RevLines.append("{}\n".format(qual[len(qual)/2:]))
+    return FwdLines,RevLines
 
 def get_headFname(filename,fileExtList):
     for ext in fileExtList:
@@ -804,6 +843,7 @@ def kmerRefFilter(ArgsVal):
 
     parser.add_argument("-f","--fastqfile", help="Fastq to filter (fastq, gz, bz2)", nargs='*')
     parser.add_argument("-l","--fastqlist", help="text file with all fastq (fastq, gz, bz2) path -- 1 per line")
+    parser.add_argument("-ct","--concatenatedfastq", help="input fastq files are concatenated (FWD+REV in one read). Split half reads and quality values. Should be use with -f or -l or -u or -s options only", action="store_const", const=True, default=False)
     parser.add_argument("-1","--fwdfastq", help="forward Fastq to filter (fastq, gz, bz2) respect file order with reverse files", nargs='*')
     parser.add_argument("-2","--revfastq", help="reverse Fastq to filter (fastq, gz, bz2) respect file order with forward files", nargs='*')
     parser.add_argument("-u","--fastqurl", help="url to Fastq to filter (fastq, gz)", nargs='*')
@@ -824,27 +864,39 @@ def kmerRefFilter(ArgsVal):
     
     if not args.outputdir and not args.kmeroutput:
         stderr_print("No output directory defined (-o)\nexit...")
-        sys.exit(0)
+        sys.exit(1)
 
     if not args.referencesfasta and not args.kmerinfile:
         stderr_print("No reference fasta file or dictionary file set as input (-r or -i)\nexit...")
-        sys.exit(0)
+        sys.exit(2)
 
     if args.fwdRevChoice not in ['FWD','REV','BOTH']:
         stderr_print("-c (--fwdRevChoice) option not correctly set. Use \"FWD\", \"REV\" or \"BOTH\"\nexit...")
-        sys.exit(0)
+        sys.exit(3)
 
     if args.kmerFwdRev not in ['FWD','REV','BOTH']:
         stderr_print("-kc (--kmerFwdRev) option not correctly set. Use \"FWD\", \"REV\" or \"BOTH\"\nexit...")
-        sys.exit(0)
+        sys.exit(4)
 
     if args.kmerstats and args.kmerstats not in ['USED','ALL']:
         stderr_print("-ks (--kmerstats) option not correctly set. Use \"USED\" or \"ALL\"\nexit...")
-        sys.exit(0)
+        sys.exit(5)
 
     if args.singbothcoding not in ['SINGLE','BOTH','SINGEXBOTH']:
         stderr_print("-sbc (--singbothcoding) option not correctly set. Use \"SINGLE\" or \"BOTH\"\nexit...")
-        sys.exit(0)
+        sys.exit(6)
+
+    if (args.fwdfastq and not args.revfastq) or (not args.fwdfastq and args.revfastq):
+        stderr_print("-1 or -2 fastq files are missing\nexit...")
+        sys.exit(7)
+
+    if (args.fwdfastqurl and not args.revfastqurl) or (not args.fwdfastqurl and args.revfastqurl):
+        stderr_print("-u1 or -u2 fastq urls are missing\nexit...")
+        sys.exit(8)
+    
+    if args.concatenatedfastq and not args.fastqfile and not args.fastqlist and not args.fastqurl and not args.streamInput:
+        stderr_print("-ct option must be associated to one of these options: -f or -l or -u or -s\nexit...")
+        sys.exit(9)
 
     #test arguments values:
     argToTest=[(args.maxmemory,{'min':0,'max':None},"--maxmemory"),\
@@ -878,15 +930,21 @@ def kmerRefFilter(ArgsVal):
     excludeFiles = args.excludefasta
 
     paired = False
+    concatenated=False
     namedPipe = False
 
     if args.fastqfile:
         fastqFile = args.fastqfile
-        
+        if args.concatenatedfastq:
+            paired = True
+            concatenated=True
     elif args.fastqlist:
         flist=open(args.fastqlist,"r")
         fastqFile = [f.strip() for f in flist]
         flist.close()
+        if args.concatenatedfastq:
+            paired = True
+            concatenated=True
     elif args.fwdfastq and args.revfastq:
 
         fastqFwdFile = args.fwdfastq
@@ -899,6 +957,9 @@ def kmerRefFilter(ArgsVal):
 
     elif args.streamInput:
         fastqFile = [args.streamInput]
+        if args.concatenatedfastq:
+            paired = True
+            concatenated=True
 
     elif args.fwdfastqurl and not args.fastqurl:
         fastqFwdurl = args.fwdfastqurl
@@ -940,6 +1001,9 @@ def kmerRefFilter(ArgsVal):
             os.system(cmd)
 
         namedPipe = True
+        if args.concatenatedfastq:
+            paired = True
+            concatenated=True
 
     elif args.kmeroutput:
         stderr_print("no input fastq files required to save kmer dictionnary")
@@ -988,13 +1052,18 @@ def kmerRefFilter(ArgsVal):
     fasqFileNbr = 0
 
     if paired:
-        fasqFileNbr = len(fastqFwdFile)
-        for i in range(0,len(fastqFwdFile)):
-            yamlKey = "{} - {}".format(fastqFwdFile[i],fastqRevFile[i])
-            yamlResume[yamlKey] = kmerRefFilterPairedProc(dicReads,kmerSize,fastqFwdFile[i],fastqRevFile[i],minMatchKeepSeq,args.fwdRevChoice,args.keepNotFiltered,namedPipe,kmerstats)
-            if namedPipe:
-                os.remove(fastqFwdFile[i])
-                os.remove(fastqRevFile[i])
+        if concatenated:
+            fasqFileNbr = len(fastqFile)
+            for fastq in fastqFile:
+                yamlResume[os.path.basename(fastq)] = kmerRefFilterPairedProc(dicReads,kmerSize,fastq,"","",minMatchKeepSeq,args.fwdRevChoice,args.keepNotFiltered,namedPipe,kmerstats)
+        else:
+            fasqFileNbr = len(fastqFwdFile)
+            for i in range(0,len(fastqFwdFile)):
+                yamlKey = "{} - {}".format(fastqFwdFile[i],fastqRevFile[i])
+                yamlResume[yamlKey] = kmerRefFilterPairedProc(dicReads,kmerSize,"",fastqFwdFile[i],fastqRevFile[i],minMatchKeepSeq,args.fwdRevChoice,args.keepNotFiltered,namedPipe,kmerstats)
+                if namedPipe:
+                    os.remove(fastqFwdFile[i])
+                    os.remove(fastqRevFile[i])
     else:
         fasqFileNbr = len(fastqFile)
         for fastq in fastqFile:
@@ -1008,7 +1077,6 @@ def kmerRefFilter(ArgsVal):
 
         
     stderr_print(TitleFrame("kmer statistics generation"))
-    #kmuse=sum([1 for km in dicReads if km in kmerstats.keys()])
     kmuse=len(kmerstats.keys())
 
     if args.kmerstats:

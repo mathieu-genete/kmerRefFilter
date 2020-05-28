@@ -25,9 +25,10 @@ import yaml
 from multiprocessing import Pool
 from functools import partial
 
-__version__= "v1.3.6"
+__version__= "v1.3.7"
 
 args = None
+logfile = None
 deltaTprogress = None
 
 random.seed(time.time())
@@ -114,7 +115,14 @@ def check_max_memoryGo_used():
     return memused
 
 def stderr_print(txt):
-    sys.stderr.write(str(txt)+"\n")
+    if not args.noverbose:
+        sys.stderr.write(str(txt)+"\n")
+    log_write(txt)
+
+def log_write(txt):
+    if logfile and not args.nologfile :
+        with open(logfile,'a') as hlogf:
+            hlogf.write("{}\n".format(str(txt)))
 
 def CompSeqAlphabet(seq,alphabet):
     s1=set(seq)
@@ -343,8 +351,9 @@ def creat_FastqReadsDictionary(fastqFile):
     return rslt
 
 def printProgress(txt):
-    sys.stderr.write("\r"+str(txt))
-    sys.stderr.flush()
+    if not args.noverbose:
+        sys.stderr.write("\r"+str(txt))
+        sys.stderr.flush()
 
 def kmerRefFilterProc(dicReads,kmerSize,fastqFile,minMatchKeepSeq,keepNotFiltered,namedPipe,kmerstats):
 
@@ -807,6 +816,7 @@ def kmerRefFilter(ArgsVal):
 
     global args
     global deltaTprogress
+    global logfile
 
     deltaTprogress = 3
 
@@ -825,6 +835,8 @@ def kmerRefFilter(ArgsVal):
     parser.add_argument("-mem","--maxmemory", help="maximum memory used in Go (default = 5 Go) - set to 0 for unlimited memory usage",default=5, type=int)
     parser.add_argument("-P","--multiproc", help="use multiprocessing for kmer dictionary generation -- number of CPU",default=0, type=int)
     parser.add_argument("-o","--outputdir", help="output directory for filtered fastq files")
+    parser.add_argument("-nolog","--nologfile", help="Disable log file output", action="store_const", const=True, default=False)
+    parser.add_argument("-nov","--noverbose", help="Disable output log on stderr", action="store_const", const=True, default=False)
 
     parser.add_argument("-k","--kmersize", help="size for kmers - default=20",default=20, type=int)
     parser.add_argument("-ks","--kmerstats", help="generate kmer statistics output table USED or ALL (USED by default)", nargs='?',const='USED')
@@ -916,14 +928,16 @@ def kmerRefFilter(ArgsVal):
         if not testrslt:
             testFailed=True
     if testFailed:
-        sys.exit(-2)
+        sys.exit(10)
 
     if args.maxporf<args.minporf:
         stderr_print("--minporf should be lesser than --maxporf")
-        sys.exit(-2)
+        sys.exit(11)
 
-    progVersion = "{pname} {ver}".format(pname=os.path.basename(sys.argv[0]),ver=__version__)
+    progVersion = "{pname} {ver} {dat}".format(pname=os.path.basename(sys.argv[0]),ver=__version__,dat=datetime.now().strftime("[%d/%m/%Y %H:%M:%S]"))
     
+    logfile=os.path.join(args.outputdir,"log_kmerRefFilter_{}".format(datetime.now().strftime("%d_%m_%Y-%H_%M_%S")))
+
     stderr_print(TitleFrame(progVersion))
     
     refFiles = args.referencesfasta
@@ -1101,6 +1115,7 @@ def kmerRefFilter(ArgsVal):
     elapTime = time.strftime("%Hh%Mm%Ss", time.gmtime(time.time()-start))
     
     stderr_print("\nFiltering terminated in {} - {} fastq file(s) analysed".format(elapTime,fasqFileNbr))
+    stderr_print("\n{}".format(datetime.now().strftime("[%d/%m/%Y %H:%M:%S]")))
 
 if    __name__ == '__main__':
     kmerRefFilter(sys.argv[1:])

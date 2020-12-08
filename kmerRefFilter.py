@@ -9,6 +9,7 @@ import bz2
 import argparse
 import random
 import math
+import numpy as np
 import time
 from datetime import datetime
 from Bio.SeqUtils import GC
@@ -25,11 +26,12 @@ import yaml
 from multiprocessing import Pool
 from functools import partial
 
-__version__= "v1.3.7"
+__version__= "v1.3.8"
 
 args = None
 logfile = None
 deltaTprogress = None
+readscount = 0
 
 random.seed(time.time())
 
@@ -438,17 +440,16 @@ def kmerRefFilterProc(dicReads,kmerSize,fastqFile,minMatchKeepSeq,keepNotFiltere
         else:
             keepReadBool=(m>0 and m>=minMatchKeepSeq)
 
-        if keepReadBool:
-            add_kmerInStats(intersections,kmerstats)
+        if keepReadBool and ((seq not in outReadsDic) or (not args.append)):
             matched+=1
-            if (seq not in outReadsDic) or (not args.append):
-                readFound=True
-                appendNbr+=1
-                SumReadsSize+=len(seq)
-                outf.write(l1)
-                outf.write(l2)
-                outf.write(l3)
-                outf.write(l4)
+            add_kmerInStats(intersections,kmerstats)
+            readFound=True
+            appendNbr+=1
+            SumReadsSize+=len(seq)
+            outf.write(l1)
+            outf.write(l2)
+            outf.write(l3)
+            outf.write(l4)
 
         t += 1
         tot +=1
@@ -736,18 +737,17 @@ def search_kmerInRead(readRange,kmerSize,dicReads,minMatchKeepSeq,outReadsDic,se
     else:
         keepReadBool=(m>0 and m>=minMatchKeepSeq)
 
-    if keepReadBool:
-        add_kmerInStats(intersections,kmerstats)
+    if keepReadBool and ((seq not in outReadsDic) or (not args.append)):
         matched+=1
-        if (seq not in outReadsDic) or (not args.append):
-            appendNbr+=1
-            Readfiltered = True
-            SumReadsSize+=(float(len(FwdL[1].strip()))+float(len(RevL[1].strip())))/2
-            for Fline in FwdL:
-                Fwdoutf.write(Fline)
-                                
-            for Rline in RevL:
-                Revoutf.write(Rline)
+        add_kmerInStats(intersections,kmerstats)
+        appendNbr+=1
+        Readfiltered = True
+        SumReadsSize+=(float(len(FwdL[1].strip()))+float(len(RevL[1].strip())))/2
+        for Fline in FwdL:
+            Fwdoutf.write(Fline)
+            
+        for Rline in RevL:
+            Revoutf.write(Rline)
     if matched>0:
         rdmeanSize=float(SumReadsSize)/float(matched)
     else:
@@ -758,10 +758,13 @@ def search_kmerInRead(readRange,kmerSize,dicReads,minMatchKeepSeq,outReadsDic,se
     return outVal
 
 def add_kmerInStats(kmers,kmerstats):
+    global readscount
     for km in kmers:
         if km not in kmerstats.keys():
-            kmerstats[km]={'count':0}
+            kmerstats[km]={'count':0,'idxreads':[]}
         kmerstats[km]['count']+=1
+        kmerstats[km]['idxreads'].append(readscount)
+    readscount+=1
 
 def create_PickleFromDict(pickleFilePath, dic):
     pf = gzip.open(pickleFilePath,'wb')
@@ -812,11 +815,58 @@ def test_arg_range(val,allowedRange,argname):
         return False
     return True
 
+def clean_filteredFQ(yamlResume,kmerstats,thresholdMinMax,paired):
+    yamlvalues=yamlResume.values()[0]
+    outfiles=yamlvalues['out file']
+    kmidxList_toremove=set()
+    kmidxList_outside=set()
+    for km,kmvalues in kmerstats.items():
+        if (kmvalues['count']<=thresholdMinMax[0] and thresholdMinMax[0]>=0) or (kmvalues['count']>=thresholdMinMax[1] and thresholdMinMax[1]>0):
+            kmidxList_toremove.update(set(kmvalues['idxreads']))
+        else:
+            kmidxList_outside.update(set(kmvalues['idxreads']))
+    kmidxList=kmidxList_toremove.difference(kmidxList_outside)
+    rdcount=0
+    keepreads=0
+    if paired:
+        outclean=["{}_cleaned.fastq".format(v[:v.rfind('.')]) for v in outfiles]
+        with open(outclean[0],'w') as outClFwd:
+            with open(outclean[1],'w') as outClRev:
+                with open(outfiles[0],'r') as fwdFile:
+                    with open(outfiles[1],'r') as revFile:
+                        while True:
+                            fwdLines,RevLines = read_pairedFastqLine(fwdFile,fwdFile)
+                            if fwdLines[1]=="": break
+                            if rdcount not in kmidxList:
+                                keepreads+=1
+                                write_lines(outClFwd,fwdLines)
+                                write_lines(outClRev,RevLines)
+                            rdcount+=1
+    else:
+        outclean="{}_cleaned.fastq".format(outfiles[0][:outfiles[0].rfind('.')])
+        with open(outclean,'w') as outCl:
+            with open(outfiles[0],'r') as fqfile:
+                while True:
+                    fqlines=[fqfile.readline() for i in xrange(4)]
+                    if fqlines[1]=="" : break
+                    if rdcount not in kmidxList:
+                        keepreads+=1
+                        write_lines(outCl,fqlines)
+                    rdcount+=1
+    total_reads=yamlvalues['reads Nbr']
+    percent_retained=100*float(keepreads)/float(total_reads)
+    return keepreads,total_reads,percent_retained
+
+def write_lines(fh,lines):
+    for l in lines:
+        fh.write(l)
+
 def kmerRefFilter(ArgsVal):
 
     global args
     global deltaTprogress
     global logfile
+    global readscount
 
     deltaTprogress = 3
 
@@ -853,12 +903,11 @@ def kmerRefFilter(ArgsVal):
     parser.add_argument("-x","--excludefasta", help="fasta files with sequences to exclude", nargs='*',default=[])
     parser.add_argument("-maxRD","--maxreads", help="maximum number of read to analyze",default=0, type=int)
 
-    parser.add_argument("-f","--fastqfile", help="Fastq to filter (fastq, gz, bz2)", nargs='*')
-    parser.add_argument("-l","--fastqlist", help="text file with all fastq (fastq, gz, bz2) path -- 1 per line")
+    parser.add_argument("-f","--fastqfile", help="Fastq to filter (fastq, gz, bz2)")
     parser.add_argument("-ct","--concatenatedfastq", help="input fastq files are concatenated (FWD+REV in one read). Split half reads and quality values. Should be use with -f or -l or -u or -s options only", action="store_const", const=True, default=False)
-    parser.add_argument("-1","--fwdfastq", help="forward Fastq to filter (fastq, gz, bz2) respect file order with reverse files", nargs='*')
-    parser.add_argument("-2","--revfastq", help="reverse Fastq to filter (fastq, gz, bz2) respect file order with forward files", nargs='*')
-    parser.add_argument("-u","--fastqurl", help="url to Fastq to filter (fastq, gz)", nargs='*')
+    parser.add_argument("-1","--fwdfastq", help="forward Fastq to filter (fastq, gz, bz2) respect file order with reverse files")
+    parser.add_argument("-2","--revfastq", help="reverse Fastq to filter (fastq, gz, bz2) respect file order with forward files")
+    parser.add_argument("-u","--fastqurl", help="url to Fastq to filter (fastq, gz)")
     parser.add_argument("-u1","--fwdfastqurl", help="url to forward Fastq to filter (fastq, gz)")
     parser.add_argument("-u2","--revfastqurl", help="url to reverse Fastq to filter (fastq, gz)")
     parser.add_argument("-ugzip","--urlgzip", help="indicate that url's given in -u or in -u1 and -u2 are gz files", action="store_const", const=True, default=False)
@@ -868,6 +917,10 @@ def kmerRefFilter(ArgsVal):
     
     parser.add_argument("-morf","--minporf", help="minimum percent of ORF in read",default=0, type=float)
     parser.add_argument("-Morf","--maxporf", help="maximum percent of ORF in read",default=1, type=float)
+
+    parser.add_argument("-mkc","--minkmercount", help="minimum kmer count for recruited reads",default=0, type=int)
+    parser.add_argument("-Mkc","--maxkmercount", help="maximum kmer count for recruited reads",default=0, type=int)
+
     parser.add_argument("-sorf","--strandorf", help="force strand for ORF filtering (both=0, +=1, -=2) -- default=0", default=0, type=int)
     parser.add_argument("-pfreq","--maxprotfreq", help="maximum frequency of AA repetitions in proteics sequences from reads (default = 0.6)",default=0.8, type=float)
     parser.add_argument("-sbc","--singbothcoding", help="apply ORF threshold for single (SINGLE); both (BOTH) forward and reverse reads to keep the pair or single exclude both (SINGEXBOTH) (SINGLE - by default)", default='SINGLE')
@@ -906,7 +959,7 @@ def kmerRefFilter(ArgsVal):
         stderr_print("-u1 or -u2 fastq urls are missing\nexit...")
         sys.exit(8)
     
-    if args.concatenatedfastq and not args.fastqfile and not args.fastqlist and not args.fastqurl and not args.streamInput:
+    if args.concatenatedfastq and not args.fastqfile and not args.fastqurl and not args.streamInput:
         stderr_print("-ct option must be associated to one of these options: -f or -l or -u or -s\nexit...")
         sys.exit(9)
 
@@ -921,7 +974,11 @@ def kmerRefFilter(ArgsVal):
                (args.minporf,{'min':0.0,'max':1.0},"--minporf"),\
                (args.maxporf,{'min':0.0,'max':1.0},"--maxporf"),\
                (args.maxprotfreq,{'min':0.0,'max':1.0},"--maxprotfreq"),\
-               (args.strandorf,{'min':0,'max':2},"--strandorf")]
+               (args.strandorf,{'min':0,'max':2},"--strandorf"),\
+               (args.minkmercount,{'min':0,'max':None},"--minkmercount"),\
+               (args.maxkmercount,{'min':0,'max':None},"--maxkmercount")]
+
+    kmerCountThrld=(args.minkmercount,args.maxkmercount)        
     testFailed=False
     for argt in argToTest:
         testrslt=test_arg_range(argt[0],argt[1],argt[2])
@@ -949,13 +1006,6 @@ def kmerRefFilter(ArgsVal):
 
     if args.fastqfile:
         fastqFile = args.fastqfile
-        if args.concatenatedfastq:
-            paired = True
-            concatenated=True
-    elif args.fastqlist:
-        flist=open(args.fastqlist,"r")
-        fastqFile = [f.strip() for f in flist]
-        flist.close()
         if args.concatenatedfastq:
             paired = True
             concatenated=True
@@ -1063,27 +1113,19 @@ def kmerRefFilter(ArgsVal):
     yamlResume={}
     kmerstats={}
 
-    fasqFileNbr = 0
-
     if paired:
         if concatenated:
-            fasqFileNbr = len(fastqFile)
-            for fastq in fastqFile:
-                yamlResume[os.path.basename(fastq)] = kmerRefFilterPairedProc(dicReads,kmerSize,fastq,"","",minMatchKeepSeq,args.fwdRevChoice,args.keepNotFiltered,namedPipe,kmerstats)
+            yamlResume[os.path.basename(fastqFile)] = kmerRefFilterPairedProc(dicReads,kmerSize,fastqFile,"","",minMatchKeepSeq,args.fwdRevChoice,args.keepNotFiltered,namedPipe,kmerstats)
         else:
-            fasqFileNbr = len(fastqFwdFile)
-            for i in range(0,len(fastqFwdFile)):
-                yamlKey = "{} - {}".format(fastqFwdFile[i],fastqRevFile[i])
-                yamlResume[yamlKey] = kmerRefFilterPairedProc(dicReads,kmerSize,"",fastqFwdFile[i],fastqRevFile[i],minMatchKeepSeq,args.fwdRevChoice,args.keepNotFiltered,namedPipe,kmerstats)
-                if namedPipe:
-                    os.remove(fastqFwdFile[i])
-                    os.remove(fastqRevFile[i])
-    else:
-        fasqFileNbr = len(fastqFile)
-        for fastq in fastqFile:
-            yamlResume[os.path.basename(fastq)] = kmerRefFilterProc(dicReads,kmerSize,fastq,minMatchKeepSeq,args.keepNotFiltered,namedPipe,kmerstats)
+            yamlKey = "{} - {}".format(fastqFwdFile,fastqRevFile)
+            yamlResume[yamlKey] = kmerRefFilterPairedProc(dicReads,kmerSize,"",fastqFwdFile,fastqRevFile,minMatchKeepSeq,args.fwdRevChoice,args.keepNotFiltered,namedPipe,kmerstats)
             if namedPipe:
-                os.remove(fastq)
+                os.remove(fastqFwdFile)
+                os.remove(fastqRevFile)
+    else:
+        yamlResume[os.path.basename(fastqFile)] = kmerRefFilterProc(dicReads,kmerSize,fastqFile,minMatchKeepSeq,args.keepNotFiltered,namedPipe,kmerstats)
+        if namedPipe:
+            os.remove(fastqFile)
     
     if args.yamlout:
         stderr_print(TitleFrame("Yaml output on stdout"))
@@ -1092,7 +1134,8 @@ def kmerRefFilter(ArgsVal):
         
     stderr_print(TitleFrame("kmer statistics generation"))
     kmuse=len(kmerstats.keys())
-
+    kmcountList=[kmvalues['count'] for km,kmvalues in kmerstats.items()]
+    #print([v for k,v in kmerstats.items()])
     if args.kmerstats:
         dt=datetime.now().strftime("%d_%m_%Y-%H_%M_%S")
         kmerstatsFileName=os.path.join(args.outputdir,"kmerstats_{}".format(dt))
@@ -1102,19 +1145,26 @@ def kmerRefFilter(ArgsVal):
                     kmfile.write("{kmer}\t{cnt}\t{entro}\t{repeats}\n".format(kmer=km,cnt=kmerstats[km]['count'],entro=get_ShannonEntropy(km),repeats=repeats_frequency(km)))
                 elif args.kmerstats=='ALL':
                     kmfile.write("{kmer}\t{cnt}\t{entro}\t{repeats}\n".format(kmer=km,cnt=0,entro=get_ShannonEntropy(km),repeats=repeats_frequency(km)))
-
+        
     stderr_print("Total kmer: {} -- kmers used nbr {} -- kmers nevers used {}\n".format(len(dicReads),kmuse,len(dicReads)-kmuse))
+    stderr_print("stats: mean count {} -- standard deviation {} -- median count {}\n".format(np.mean(kmcountList),np.std(kmcountList),np.median(kmcountList)))
+    hist=np.histogram(kmcountList)
+    stderr_print("Distribution:\nFreq\t{}\nCounts\t{}\n".format("\t".join([str(v) for v in hist[0]]),"\t".join([str(round(v,1)) for v in hist[1]])))
     stderr_print("30 most used kmers:\n")
     tenSortedkmuse=sorted(kmerstats.iteritems(), key=lambda x : x[1], reverse=True)[:30]
     stderr_print("\tkmer\tcount\tentropy\trepetitions")
     for km,v in tenSortedkmuse:
         rprslt=repeats_frequency(km)
         stderr_print("\t{kmer}\t{cnt}\t{entro}\t{repeats}".format(kmer=km,cnt=v['count'],entro=round(get_ShannonEntropy(km),2),repeats=(rprslt['letters'],round(rprslt['freq'],2))))
-                                
+
+    if args.minkmercount>=0 and args.maxkmercount>0:
+        stderr_print("\nClean filtered fastq files.")
+        nbrClean,total_reads,percent_retained=clean_filteredFQ(yamlResume,kmerstats,kmerCountThrld,paired)
+        stderr_print("\n{nbc} reads keeped afer cleaning ({pm}%)".format(nbc=nbrClean,pm=round(percent_retained,3)))
                         
     elapTime = time.strftime("%Hh%Mm%Ss", time.gmtime(time.time()-start))
     
-    stderr_print("\nFiltering terminated in {} - {} fastq file(s) analysed".format(elapTime,fasqFileNbr))
+    stderr_print("\nFiltering terminated in {}".format(elapTime))
     stderr_print("\n{}".format(datetime.now().strftime("[%d/%m/%Y %H:%M:%S]")))
 
 if    __name__ == '__main__':

@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 ### Author: Mathieu Genete
@@ -15,10 +15,9 @@ from datetime import datetime
 from Bio.SeqUtils import GC
 from Bio import SeqIO
 from Bio import Seq
-from Bio.Alphabet import generic_dna
 from itertools import product
 import sys
-import cPickle
+import pickle as cPickle
 import stat
 import os
 import psutil
@@ -26,7 +25,7 @@ import yaml
 from multiprocessing import Pool
 from functools import partial
 
-__version__= "v1.3.8"
+__version__= "v1.4"
 
 args = None
 logfile = None
@@ -39,7 +38,7 @@ def find_read_ORF(seq,minPercORF,maxPercORF):
     outCoding={'IsCoding':False,'pctORF':0,'strand':{'value':'','phase':0,'prot':'','protShE':0,'protFreq':{'letters':'','freq':-1}},'dnaShE':0}
     if len(seq)>=6:
         theoricProtSize=(len(seq)-(len(seq)%3))/3
-        dnaSeq=Seq.Seq(seq,generic_dna)
+        dnaSeq=Seq.Seq(seq)
         RCdnaSeq=dnaSeq.reverse_complement()
         for phase in range(0,3):
             pstrand=dnaSeq[phase:]
@@ -110,7 +109,7 @@ def check_max_memoryGo_used():
     memused=0
     if args.maxmemory>0:
             maxmem=args.maxmemory*1000000000
-            memused=get_procmem().vms
+            memused=get_procmem().rss
             if  memused > maxmem:
                     stderr_print("ERROR: maximum memory allowed ({} Go) used.({})".format(args.maxmemory,memused))
                     sys.exit(-5)                
@@ -134,7 +133,7 @@ def CompSeqAlphabet(seq,alphabet):
     return True
 
 def get_ratioAmbigous(seq):
-    ud = Seq.IUPAC.IUPACData.unambiguous_dna_letters
+    ud = ['G','A','T','C']
     nbAmb = sum(seq.count(b) for b in ud)
     ratioAmb = 1.0-(float(nbAmb)/float(len(seq)))
     return ratioAmb
@@ -313,25 +312,18 @@ def mutedkmers(kmseq):
     return set(replaces)
 
 def find_Magic_Bytes(filename,magic_bytes):
-    
-    with open(filename) as infile:
+    with open(filename,'r',encoding="ISO-8859-1") as infile:
         file_start = infile.read(len(magic_bytes))
-        
     if file_start.startswith(magic_bytes):
         return True
-        
     return False
 
 def is_gzip(filename):
-
     magic_bytes = "\x1f\x8b\x08"
-    
     return find_Magic_Bytes(filename,magic_bytes)
 
 def is_b2z(filename):
-
     magic_bytes = "\x42\x5a\x68"
-    
     return find_Magic_Bytes(filename,magic_bytes)
 
 def creat_FastqReadsDictionary(fastqFile):
@@ -344,6 +336,7 @@ def creat_FastqReadsDictionary(fastqFile):
         l3 = fastq.readline()
         l4 = fastq.readline()
         seq = l2.strip()
+
         rslt.add(seq)
         
         if not l4: break
@@ -783,9 +776,9 @@ def open_fastqFile(fastqFile,namedPipe):
         fastq = open(fastqFile)
     else:
         if is_gzip(fastqFile):
-            fastq = gzip.open(fastqFile, "r")
+            fastq = gzip.open(fastqFile, 'rt', encoding='utf-8')
         elif is_b2z(fastqFile):    
-            fastq = bz2.BZ2File(fastqFile, "r")    
+            fastq = bz2.open(fastqFile, 'rt', encoding='utf-8')    
         else:
             fastq = open(fastqFile,"r")
 
@@ -1151,7 +1144,7 @@ def kmerRefFilter(ArgsVal):
     hist=np.histogram(kmcountList)
     stderr_print("Distribution:\nFreq\t{}\nCounts\t{}\n".format("\t".join([str(v) for v in hist[0]]),"\t".join([str(round(v,1)) for v in hist[1]])))
     stderr_print("30 most used kmers:\n")
-    tenSortedkmuse=sorted(kmerstats.iteritems(), key=lambda x : x[1], reverse=True)[:30]
+    tenSortedkmuse=sorted(kmerstats.items(), key=lambda x : x[1]['count'], reverse=True)[:30]
     stderr_print("\tkmer\tcount\tentropy\trepetitions")
     for km,v in tenSortedkmuse:
         rprslt=repeats_frequency(km)

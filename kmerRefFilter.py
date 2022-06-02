@@ -25,7 +25,7 @@ import yaml
 from multiprocessing import Pool
 from functools import partial
 
-__version__= "v1.4"
+__version__= "v1.5"
 
 args = None
 logfile = None
@@ -811,6 +811,7 @@ def test_arg_range(val,allowedRange,argname):
 def clean_filteredFQ(yamlResume,kmerstats,thresholdMinMax,paired):
     yamlvalues=yamlResume.values()[0]
     outfiles=yamlvalues['out file']
+    retainedkmerstats={}
     kmidxList_toremove=set()
     kmidxList_outside=set()
     for km,kmvalues in kmerstats.items():
@@ -818,6 +819,7 @@ def clean_filteredFQ(yamlResume,kmerstats,thresholdMinMax,paired):
             kmidxList_toremove.update(set(kmvalues['idxreads']))
         else:
             kmidxList_outside.update(set(kmvalues['idxreads']))
+            retainedkmerstats[km]=kmvalues
     kmidxList=kmidxList_toremove.difference(kmidxList_outside)
     rdcount=0
     keepreads=0
@@ -848,7 +850,7 @@ def clean_filteredFQ(yamlResume,kmerstats,thresholdMinMax,paired):
                     rdcount+=1
     total_reads=yamlvalues['reads Nbr']
     percent_retained=100*float(keepreads)/float(total_reads)
-    return keepreads,total_reads,percent_retained
+    return keepreads,total_reads,percent_retained,retainedkmerstats
 
 def write_lines(fh,lines):
     for l in lines:
@@ -1152,8 +1154,14 @@ def kmerRefFilter(ArgsVal):
 
     if args.minkmercount>=0 and args.maxkmercount>0:
         stderr_print("\nClean filtered fastq files.")
-        nbrClean,total_reads,percent_retained=clean_filteredFQ(yamlResume,kmerstats,kmerCountThrld,paired)
+        nbrClean,total_reads,percent_retained,retainedkmerstats=clean_filteredFQ(yamlResume,kmerstats,kmerCountThrld,paired)
         stderr_print("\n{nbc} reads keeped afer cleaning ({pm}%)".format(nbc=nbrClean,pm=round(percent_retained,3)))
+        stderr_print("30 most used kmers after cleaning:\n")
+        tenSortedkmuse=sorted(retainedkmerstats.items(), key=lambda x : x[1]['count'], reverse=True)[:30]
+        stderr_print("\tkmer\tcount\tentropy\trepetitions")
+        for km,v in tenSortedkmuse:
+            rprslt=repeats_frequency(km)
+            stderr_print("\t{kmer}\t{cnt}\t{entro}\t{repeats}".format(kmer=km,cnt=v['count'],entro=round(get_ShannonEntropy(km),2),repeats=(rprslt['letters'],round(rprslt['freq'],2))))
                         
     elapTime = time.strftime("%Hh%Mm%Ss", time.gmtime(time.time()-start))
     

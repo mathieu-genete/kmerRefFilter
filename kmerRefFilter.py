@@ -143,8 +143,8 @@ def get_ShannonEntropy(dna,alphabet="ATCG"):
     Udna = dna.upper()
     for base in alphabet:
             freq = float(Udna.count(base))/float(len(Udna))
-            if freq==0: freq = 0.00000001
-            ShEntropy = ShEntropy + freq*math.log(freq,2)
+            if freq>0:
+                ShEntropy = ShEntropy + freq*math.log(freq,2)
     return -ShEntropy
 
 def RatioMaxBaseOccurence(seq):

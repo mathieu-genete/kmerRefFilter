@@ -809,13 +809,13 @@ def test_arg_range(val,allowedRange,argname):
     return True
 
 def clean_filteredFQ(yamlResume,kmerstats,thresholdMinMax,paired):
-    yamlvalues=yamlResume.values()[0]
+    yamlvalues=list(yamlResume.values())[0]
     outfiles=yamlvalues['out file']
     retainedkmerstats={}
     kmidxList_toremove=set()
     kmidxList_outside=set()
     for km,kmvalues in kmerstats.items():
-        if (kmvalues['count']<=thresholdMinMax[0] and thresholdMinMax[0]>=0) or (kmvalues['count']>=thresholdMinMax[1] and thresholdMinMax[1]>0):
+        if (kmvalues['count']<thresholdMinMax[0] and thresholdMinMax[0]>=0) or (kmvalues['count']>thresholdMinMax[1] and thresholdMinMax[1]>0):
             kmidxList_toremove.update(set(kmvalues['idxreads']))
         else:
             kmidxList_outside.update(set(kmvalues['idxreads']))
@@ -1153,10 +1153,10 @@ def kmerRefFilter(ArgsVal):
         stderr_print("\t{kmer}\t{cnt}\t{entro}\t{repeats}".format(kmer=km,cnt=v['count'],entro=round(get_ShannonEntropy(km),2),repeats=(rprslt['letters'],round(rprslt['freq'],2))))
 
     if args.minkmercount>=0 and args.maxkmercount>0:
-        stderr_print("\nClean filtered fastq files.")
+        stderr_print(TitleFrame("Clean filtered fastq files on kmer counts [{},{}]".format(args.minkmercount,args.maxkmercount)))
         nbrClean,total_reads,percent_retained,retainedkmerstats=clean_filteredFQ(yamlResume,kmerstats,kmerCountThrld,paired)
         stderr_print("\n{nbc} reads keeped afer cleaning ({pm}%)".format(nbc=nbrClean,pm=round(percent_retained,3)))
-        stderr_print("30 most used kmers after cleaning:\n")
+        stderr_print("\n30 most used kmers after kmer count cleaning:\n")
         tenSortedkmuse=sorted(retainedkmerstats.items(), key=lambda x : x[1]['count'], reverse=True)[:30]
         stderr_print("\tkmer\tcount\tentropy\trepetitions")
         for km,v in tenSortedkmuse:

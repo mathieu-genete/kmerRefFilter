@@ -25,7 +25,7 @@ import yaml
 from multiprocessing import Pool
 from functools import partial
 
-__version__= "v1.5"
+__version__= "v2.0"
 
 args = None
 logfile = None
@@ -888,7 +888,7 @@ def kmerRefFilter(ArgsVal):
     parser.add_argument("-m","--minMatchKeepSeq", help="minimum number of ref reads matched to keep fastq read -- default=1",default=1, type=int)
     parser.add_argument("-z","--minShEntropy", help="minimum Shannon Entropy for kmers (0 to 2.0)-- defaut=0.8",default=0.8, type=float)
     parser.add_argument("-q","--maxratioAmbigous", help="maximum frequency of ambigous bases accepted in kmers -- defaut=0.2",default=0.2, type=float)
-    parser.add_argument("-j","--maxRepeatsFreq", help="maximum frequency of 2-4 mers repetitions accepted in kmers -- defaut=0.8",default=0.8, type=float)
+    parser.add_argument("-j","--maxRepeatsFreq", help="maximum frequency of 2-4 mers repetitions accepted in kmers -- defaut=1.0",default=1.0, type=float)
     parser.add_argument("-b","--mutedkmers", help="generates all single bases replacement possibilities for each dictionary kmers (huge memory consumption)", action="store_const", const=True, default=False)    
     parser.add_argument("-e","--extremity5p3p", help="compare 5' and 3' read extremity only -- nbr of bases to test from extremities default=1", nargs='?', const=1, type=int)
     
